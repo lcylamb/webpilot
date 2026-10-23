@@ -165,9 +165,19 @@ webpilot/
 │  ├─ guardrails.ts        # 域名白名单
 │  └─ memory.ts            # 任务记忆（RAG）：本地 embedding + 向量检索
 ├─ public/todo.html        # 内置演示站点
+├─ public/claim.html       # 模拟保险理赔报案页（数据纯虚构）
+├─ python/agent_loop.py    # 同一 ReAct 循环的 Python 版（跨语言对照 + 自检）
 ├─ scripts/verify.ts       # 可复现验证（npm run verify，含记忆收益用例）
 ├─ .env.example
 └─ package.json
+```
+
+## Python 版循环（跨语言对照）
+
+`python/agent_loop.py` 是同一个 ReAct 循环的 Python 表达：与 TS 版逐段对应（SYSTEM_PROMPT / TOOLS / run_agent），用于证明 function calling 循环不绑定语言——核心就三件事：把工具 schema 发给模型、解析 `tool_calls`、把结果以 `role=tool` 压回历史。支持真实运行（playwright + DeepSeek）与 `--selftest`（假 LLM 驱动，离线验证消息流转与 Reflexion）。
+
+```bash
+python python/agent_loop.py --selftest   # 不联网验证循环机制
 ```
 
 ## 面试必讲清的原理
