@@ -1,0 +1,8 @@
+services:
+  webpilot:
+    build: .
+    ports:
+      - "3000:3000"
+    # 密钥只从环境注入，不进镜像：把 .env.local 放同级目录即可
+    env_file:
+      - .env.local

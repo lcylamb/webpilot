@@ -62,6 +62,17 @@ npm run dev
 
 打开 http://localhost:3000 ，点击「运行 Agent」即可看到默认演示（打开 `public/todo.html`，添加 3 条待办并断言）。
 
+### Docker 一键启动（免装 Node / Chromium）
+
+```bash
+cp .env.example .env.local   # 填入 LLM_API_KEY
+docker compose up --build    # 构建镜像（含 Chromium）并启动 → http://localhost:3000
+```
+
+镜像分三个阶段（deps → build → runtime）：构建期不需要任何密钥，LLM 配置全部通过
+`env_file` 在运行时注入；运行期以非 root 用户跑，Playwright Chromium 及其系统依赖
+在镜像内就位。
+
 ## 默认演示脚本
 
 - URL：`http://localhost:3000/todo.html`（`public/todo.html`，一个内置的极简待办页）
@@ -206,6 +217,8 @@ webpilot/
 ├─ public/portal.html      # 模拟保险门户：登录门 + 报案/进度查询 Tab 工作区
 ├─ python/agent_loop.py    # 同一 ReAct 循环的 Python 版（跨语言对照 + 自检）
 ├─ scripts/verify.ts       # 可复现验证（npm run verify，含记忆收益用例）
+├─ scripts/mcp-e2e.ts      # MCP 端到端自检（不调 LLM）
+├─ Dockerfile / compose.yaml
 ├─ .env.example
 └─ package.json
 ```
