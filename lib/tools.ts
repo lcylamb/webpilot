@@ -84,6 +84,21 @@ export const toolSchemas: ToolSchema[] = [
   {
     type: "function",
     function: {
+      name: "select",
+      description: "选中下拉框（<select>）的某个选项，按选项的 value 或可见文本匹配。",
+      parameters: {
+        type: "object",
+        properties: {
+          selector: { type: "string", description: "<select> 元素的 CSS 选择器" },
+          value: { type: "string", description: "选项的 value 或可见文本" },
+        },
+        required: ["selector", "value"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "assertText",
       description: "断言匹配选择器的元素文本包含期望内容，返回通过/失败。用于验证结果。",
       parameters: {
@@ -179,6 +194,20 @@ export async function executeTool(name: string, args: any, page: Page): Promise<
     case "press": {
       await page.keyboard.press(String(args.key ?? "Enter"));
       return { ok: true, pressed: String(args.key ?? "Enter") };
+    }
+
+    case "select": {
+      const selector: string = String(args.selector ?? "");
+      const value: string = String(args.value ?? "");
+      const loc = page.locator(selector).first();
+      await loc.waitFor({ state: "visible", timeout: 8000 });
+      // 先按 value 选，选不中再按可见文本选 —— 模型更容易拿到的是页面上看到的文本
+      try {
+        await loc.selectOption(value);
+      } catch {
+        await loc.selectOption({ label: value });
+      }
+      return { ok: true, selected: value, selector };
     }
 
     case "assertText": {

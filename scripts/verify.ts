@@ -23,15 +23,21 @@ interface Case {
   id: number;
   name: string;
   task: string;
+  /** 缺省用内置 todo 页；保险场景用例指向 claim.html */
+  url?: string;
   /** memory=true 的用例是特殊流程：同任务连跑两次，验证记忆召回收益 */
   memory?: boolean;
+  /** 允许出现失败断言（反思用例的第一次失败是设计内的） */
+  allowFailures?: boolean;
 }
+
+const TODO_TASK_3 = "打开这个待办事项页面，依次添加 3 条待办：买牛奶、写周报、预约体检。然后断言列表里恰好有 3 条待办。";
 
 const CASES: Case[] = [
   {
     id: 1,
     name: "添加 3 条待办 → 断言数量为 3",
-    task: "打开这个待办事项页面，依次添加 3 条待办：买牛奶、写周报、预约体检。然后断言列表里恰好有 3 条待办。",
+    task: TODO_TASK_3,
   },
   {
     id: 2,
@@ -46,8 +52,26 @@ const CASES: Case[] = [
   {
     id: 4,
     name: "记忆收益：同任务连跑两次，第二次应命中经验",
-    task: "打开这个待办事项页面，依次添加 3 条待办：买牛奶、写周报、预约体检。然后断言列表里恰好有 3 条待办。",
+    task: TODO_TASK_3,
     memory: true,
+  },
+  {
+    id: 5,
+    name: "保险场景：理赔报案提交 → 断言已受理",
+    task: "打开这个理赔报案页面，为报案人「张三」提交一份理赔报案：保单号 PC-2026-013872，出险日期 2026-10-01，出险原因选「车辆碰撞」，预估损失金额 3500 元。提交后断言页面出现「已受理」。",
+    url: "/claim.html",
+  },
+  {
+    id: 6,
+    name: "保险场景：错误保单号被拦截 → 修正后重新提交",
+    task: "打开这个理赔报案页面，为报案人「李四」提交理赔报案：先用一个故意错误的保单号 ABC-123（出险日期 2026-09-15，出险原因选「旅行延误」，预估损失金额 800 元）提交，断言页面出现保单号格式相关的错误提示；然后把保单号改为 PC-2026-026811 重新提交，断言页面出现「已受理」。",
+    url: "/claim.html",
+  },
+  {
+    id: 7,
+    name: "失败反思：错误预期 → 反思后换策略断言成功",
+    task: "打开这个待办事项页面，先断言列表里的条目数量是 5。注意：这个预期数字可能不对，如果断言失败了，请分析失败原因（比如去数一下页面上实际的条目数），然后用正确的预期重新断言，最终以断言通过为完成标志。",
+    allowFailures: true,
   },
 ];
 
@@ -62,6 +86,8 @@ interface CaseResult {
   failedAssertions: number;
   agentSaidSuccess: boolean;
   error?: string;
+  /** 用例级最终判定；缺省 = 自报成功且无失败断言 */
+  ok?: boolean;
 }
 
 /** .env.local 必须在 lib/agent 加载之前注入 —— 那个模块在 import 时就读 process.env */
@@ -133,7 +159,7 @@ async function main(): Promise<void> {
   const results: CaseResult[] = [];
 
   /** 跑一次任务并收集结果 + 记忆事件 */
-  async function runOnce(c: Case, label: string): Promise<{ result: CaseResult; memoryEvents: any[] }> {
+  async function runOnce(c: Case, label: string): Promise<{ result: CaseResult; memoryEvents: any[]; lastAssertPass: boolean | null }> {
     console.log(`\n${"─".repeat(60)}`);
     console.log(`用例 ${c.id}：${c.name}${label ? `（${label}）` : ""}`);
     console.log(`${"─".repeat(60)}`);
@@ -141,19 +167,22 @@ async function main(): Promise<void> {
     let steps = 0;
     let assertions = 0;
     let failedAssertions = 0;
+    let lastAssertPass: boolean | null = null;
     let report: any = null;
     let error: string | undefined;
     const memoryEvents: any[] = [];
 
     await runAgent({
       task: c.task,
-      url: pageUrl,
+      url: c.url ? `http://127.0.0.1:${PORT}${c.url}` : pageUrl,
+      maxSteps: 16, // 校验重试 / 反思重试用例比默认流程多几步
       onEvent: (e: any) => {
         if (e.type === "step") {
           steps += 1;
           if (e.tool.startsWith("assert")) {
             assertions += 1;
             if (!e.result?.pass) failedAssertions += 1;
+            lastAssertPass = Boolean(e.result?.pass);
             const mark = e.result?.pass ? "✓" : "✗";
             console.log(`  ${mark} [${e.step}] ${e.tool}  ${JSON.stringify(e.result)}`);
           } else {
@@ -162,6 +191,8 @@ async function main(): Promise<void> {
           }
         } else if (e.type === "final") {
           console.log(`  → ${e.text}`);
+        } else if (e.type === "status" && e.message.includes("反思")) {
+          console.log(`  💭 ${e.message}`);
         } else if (e.type === "memory") {
           memoryEvents.push(e);
           console.log(`  🧠 [记忆·${e.phase}] ${e.message}`);
@@ -188,6 +219,7 @@ async function main(): Promise<void> {
         error,
       },
       memoryEvents,
+      lastAssertPass,
     };
   }
 
@@ -223,8 +255,14 @@ async function main(): Promise<void> {
         });
       } else {
         memory.clear(); // 每条普通用例都从干净记忆开始，互不干扰
-        const { result } = await runOnce(c, "");
-        results.push(result);
+        const { result, lastAssertPass } = await runOnce(c, "");
+        // 反思用例的第一次失败是设计内的：要求至少失败一次（证明走了失败路径）、
+        // 且最后一条断言通过（证明恢复成功）。模型偶尔漏写 STATUS 行，
+        // 所以这里不看它的自我报告，只看断言事实。
+        const ok = c.allowFailures
+          ? !result.error && result.failedAssertions >= 1 && lastAssertPass === true
+          : result.agentSaidSuccess && result.failedAssertions === 0;
+        results.push({ ...result, agentSaidSuccess: ok, ok });
       }
     }
   } finally {
@@ -243,8 +281,8 @@ async function main(): Promise<void> {
 
   let passed = 0;
   for (const r of results) {
-    // 判定标准：Agent 自己认为成功 + 没有任何断言失败
-    const ok = r.agentSaidSuccess && r.failedAssertions === 0;
+    // 判定标准：用例级判定优先；缺省 = Agent 自报成功 + 无失败断言
+    const ok = r.ok ?? (r.agentSaidSuccess && r.failedAssertions === 0);
     if (ok) passed += 1;
     console.log(
       [

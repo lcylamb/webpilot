@@ -6,6 +6,7 @@ import { recall, store } from "./memory";
 
 const MAX_STEPS = Number(process.env.MAX_STEPS || 10);
 const OVERALL_TIMEOUT_MS = Number(process.env.OVERALL_TIMEOUT_MS || 180000);
+const MAX_REFLECTIONS = Number(process.env.MAX_REFLECTIONS || 3);
 
 const SYSTEM_PROMPT = `You are WebPilot, an agent that controls a headless browser to complete tasks using tools.
 
@@ -41,9 +42,12 @@ export async function runAgent(opts: {
   url?: string;
   /** 客户端断开信号。不传的话，用户点了「停止」服务端仍会跑完剩余步骤。 */
   signal?: AbortSignal;
+  /** 本次运行的最大步数覆盖（verify 的多步用例需要比默认更多余量） */
+  maxSteps?: number;
   onEvent: (event: AgentEvent) => void;
 }) {
   const { task, url, signal, onEvent } = opts;
+  const maxSteps = opts.maxSteps ?? MAX_STEPS;
 
   const browser = await chromium.launch({ headless: true });
   const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
@@ -57,6 +61,7 @@ export async function runAgent(opts: {
   // 记忆模块用：失败与成功交互全程收集，任务结束后摘要入库
   const failures: { tool: string; args: unknown; error?: string; pass?: boolean }[] = [];
   const actions: string[] = [];
+  let reflections = 0;
 
   // 消息历史 = system prompt + 用户任务 + 每轮的工具调用/结果，这就是 Agent 的"记忆"
   const messages: any[] = [
@@ -110,7 +115,7 @@ export async function runAgent(opts: {
     let success = false;
 
     // 核心 ReAct 循环：决策 → 执行 → 观察 → 再决策
-    for (let iter = 0; iter < MAX_STEPS; iter++) {
+    for (let iter = 0; iter < maxSteps; iter++) {
       // 客户端一走就立刻停：否则「停止」按钮只停前端，服务端会把剩下的
       // 步骤全跑完，每次都真金白银调一次 LLM。
       if (signal?.aborted) throw new Error("客户端已断开，任务中止");
@@ -150,6 +155,7 @@ export async function runAgent(opts: {
       }
 
       // 执行这一步里的所有工具调用，并把结果压回历史
+      let roundHadFailure = false;
       for (const call of toolCalls) {
         if (signal?.aborted) throw new Error("客户端已断开，任务中止");
         stepNumber += 1;
@@ -181,6 +187,7 @@ export async function runAgent(opts: {
         // 记忆素材：失败和被验证有效的交互都要记
         if (result?.ok === false || result?.pass === false) {
           failures.push({ tool: name, args, error: result?.error, pass: result?.pass });
+          roundHadFailure = true;
         } else if ((name === "click" || name === "type" || name === "press") && result?.ok) {
           const sel = args?.selector ? ` ${name}(${args.selector})` : ` ${name}`;
           actions.push(sel.trim());
@@ -196,10 +203,29 @@ export async function runAgent(opts: {
           content: JSON.stringify(result),
         });
       }
+
+      // ---- Reflexion：失败后强制反思，而不是放任模型原样重试 ----
+      // 断言未通过或工具报错时，注入一条反思消息：要求先分析原因再换策略。
+      // 上限 MAX_REFLECTIONS 次，防止「反思→再失败→再反思」把步数烧光。
+      if (roundHadFailure && reflections < MAX_REFLECTIONS) {
+        reflections += 1;
+        const lastFail = failures[failures.length - 1];
+        const what = lastFail.error ?? (lastFail.pass === false ? "断言未通过" : "调用失败");
+        onEvent({ type: "status", message: `第 ${reflections} 次反思：${lastFail.tool} 失败（${what}），要求换策略重试` });
+        messages.push({
+          role: "user",
+          content:
+            `刚才的 ${lastFail.tool} 调用失败了（${what}）。请先分析失败原因，` +
+            `再换一种策略重试 —— 严禁重复一模一样的调用。` +
+            (lastFail.pass === false
+              ? `如果断言的预期值本身错了，先观察页面实际状态再修正预期。`
+              : `如果是选择器/参数的问题，重新 getSnapshot 找正确的。`),
+        });
+      }
     }
 
     if (!success && !finalText) {
-      finalText = `达到最大步数（${MAX_STEPS}），任务未完成。`;
+      finalText = `达到最大步数（${maxSteps}），任务未完成。`;
       onEvent({ type: "final", text: finalText, success: false });
     }
 
