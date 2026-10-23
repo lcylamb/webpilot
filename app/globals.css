@@ -1,0 +1,312 @@
+:root {
+  color-scheme: dark;
+  /* 深色底用纯中性灰，不带蓝调。
+     原来这套是 #0b0e14 / #131722 / #232a3b —— 偏蓝的深空色，
+     配上紫 accent 就是组件库默认暗色主题的样子。中性灰更像终端和工具。 */
+  --bg: #0e0e10;
+  --panel: #17171a;
+  --panel-2: #1e1e22;
+  --border: #2b2b30;
+  --text: #e8e8ea;
+  --muted: #8d8d95;
+  --accent: #4f8cff;
+  --ok: #3ecf8e;
+  --warn: #f5a623;
+  --err: #ff5c5c;
+  --mono: "SF Mono", ui-monospace, "JetBrains Mono", Menlo, Consolas, monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+    "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.app {
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 32px 20px 80px;
+}
+
+.topbar h1 {
+  margin: 0;
+  font-size: 26px;
+  letter-spacing: -0.02em;
+}
+
+.topbar h1 span {
+  font-weight: 500;
+  color: var(--muted);
+  font-size: 16px;
+  margin-left: 10px;
+}
+
+.subtitle {
+  color: var(--muted);
+  margin: 6px 0 0;
+}
+
+.controls {
+  margin-top: 24px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.controls label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.controls label span {
+  color: var(--muted);
+  font-size: 12px;
+  letter-spacing: 0.03em;
+}
+
+.controls input,
+.controls textarea {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  padding: 10px 12px;
+  font-family: inherit;
+  font-size: 14px;
+  resize: vertical;
+}
+
+.controls input:focus,
+.controls textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.controls-actions {
+  display: flex;
+  gap: 10px;
+}
+
+button {
+  cursor: pointer;
+  border: none;
+  border-radius: 6px;
+  padding: 10px 18px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #fff;
+}
+
+/* 单色按钮。
+   原来这里是 linear-gradient(135deg, --accent, --accent-2)，而 --accent-2 是紫色 ——
+   「蓝到紫的渐变按钮」几乎是 AI 生成界面的签名，一眼就能认出来。
+   按钮本来就该像个按钮：一个实色 + 一个明确的 hover。 */
+button.run {
+  background: var(--accent);
+}
+
+button.run:hover:not(:disabled) {
+  background: #3d7bf0;
+}
+
+button.stop {
+  background: var(--err);
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.status {
+  margin-top: 18px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 0.3;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+h2 {
+  font-size: 16px;
+  margin: 28px 0 12px;
+}
+
+.timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.step {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.step-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.step-no {
+  font-family: var(--mono);
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.tool {
+  font-family: var(--mono);
+  color: var(--accent);
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.step-body {
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.kv {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.kv .k {
+  flex: 0 0 56px;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 12px;
+  padding-top: 2px;
+}
+
+.kv code {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: #c8d3e8;
+  background: var(--panel-2);
+  padding: 4px 8px;
+  border-radius: 4px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-width: 100%;
+}
+
+.shot {
+  margin-top: 6px;
+  max-width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.result,
+.report {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px 18px;
+}
+
+.result h2 {
+  margin-top: 0;
+}
+
+.result p {
+  margin: 0;
+  color: #d6dce8;
+}
+
+.metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 10px;
+}
+
+.metrics div {
+  background: var(--panel-2);
+  border-radius: 6px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.metrics span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.metrics b {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.error {
+  margin-top: 18px;
+  background: rgba(255, 92, 92, 0.08);
+  border: 1px solid rgba(255, 92, 92, 0.35);
+  color: var(--err);
+  border-radius: 8px;
+  padding: 14px 16px;
+}
+
+/* ---- 记忆模块 ---- */
+.memory {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0 0 16px;
+  font-size: 13px;
+}
+.mem-recall,
+.mem-store {
+  padding: 8px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--border, #e2e2e2);
+}
+.mem-recall {
+  background: rgba(59, 130, 246, 0.08);
+}
+.mem-store {
+  background: rgba(16, 185, 129, 0.08);
+}

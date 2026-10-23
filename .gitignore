@@ -1,0 +1,13 @@
+node_modules/
+.next/
+.next-bak-*/
+out/
+.env
+.env.local
+*.log
+*.tsbuildinfo
+.DS_Store
+
+# 本地模型缓存与记忆存储
+.models/
+data/
