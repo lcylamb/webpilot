@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 type StepEvent = {
   type: "step";
@@ -33,6 +33,7 @@ const DEFAULT_TASK =
 export default function Home() {
   const [url, setUrl] = useState(DEFAULT_URL);
   const [task, setTask] = useState(DEFAULT_TASK);
+  const [token, setToken] = useState("");
   const [status, setStatus] = useState("");
   const [steps, setSteps] = useState<StepEvent[]>([]);
   const [final, setFinal] = useState<FinalEvent | null>(null);
@@ -41,6 +42,18 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
+
+  // 访问口令只在客户端保存（localStorage），不进仓库、不进日志。
+  // 服务端没设 ACCESS_TOKEN 时这个字段用不上，填了也不会发副作用。
+  useEffect(() => {
+    setToken(localStorage.getItem("webpilot-token") ?? "");
+  }, []);
+
+  function updateToken(v: string) {
+    setToken(v);
+    if (v) localStorage.setItem("webpilot-token", v);
+    else localStorage.removeItem("webpilot-token");
+  }
 
   function handleEvent(evt: any) {
     switch (evt.type) {
@@ -80,12 +93,18 @@ export default function Home() {
     try {
       const res = await fetch("/api/agent", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { "x-webpilot-token": token } : {}),
+        },
         body: JSON.stringify({ url, task }),
         signal: controller.signal,
       });
 
       if (!res.ok || !res.body) {
+        if (res.status === 401) {
+          throw new Error("需要访问口令：服务端开启了 ACCESS_TOKEN 校验，请在下方填入口令");
+        }
         throw new Error(`请求失败 (${res.status})`);
       }
 
@@ -139,6 +158,16 @@ export default function Home() {
         <label>
           <span>任务（自然语言）</span>
           <textarea rows={3} value={task} onChange={(e) => setTask(e.target.value)} disabled={running} />
+        </label>
+        <label>
+          <span>访问口令（服务端设置 ACCESS_TOKEN 后必填）</span>
+          <input
+            type="password"
+            value={token}
+            onChange={(e) => updateToken(e.target.value)}
+            placeholder="公开部署实例的访问口令；本地开发留空"
+            disabled={running}
+          />
         </label>
         <div className="controls-actions">
           {!running ? (

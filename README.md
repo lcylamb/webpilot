@@ -252,6 +252,11 @@ Chromium（几百 MB，含系统依赖）。因此不适合 Vercel 这类 server
 docker compose up --build   # → http://localhost:3000
 ```
 
+**公网部署必须设置 `ACCESS_TOKEN`**（见 `.env.example`）：它开启 `/api/agent` 的口令校验
+（请求头 `x-webpilot-token`，页面上的「访问口令」输入框对应填入）。域名白名单只约束
+Agent 的浏览器去哪，拦不住别人直接调 API——没有口令，任何拿到链接的人都在烧你的
+LLM 额度。
+
 ## Roadmap
 
 - 评估集扩容：`npm run verify` 目前 8 条，往 20+ 条扩，并加上重试率、幻觉率统计。

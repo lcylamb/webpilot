@@ -1,7 +1,28 @@
+import { timingSafeEqual, createHash } from "crypto";
 import { runAgent } from "@/lib/agent";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
+
+/**
+ * 访问控制：设置了 ACCESS_TOKEN 时，请求必须带 x-webpilot-token 头。
+ * 公网部署时用它挡住陌生流量烧 LLM 额度；本地开发不设即不启用。
+ */
+function checkAuth(req: Request): Response | null {
+  const expected = process.env.ACCESS_TOKEN?.trim();
+  if (!expected) return null;
+
+  const provided = req.headers.get("x-webpilot-token") ?? "";
+  // 先哈希再比较，等长且不泄露时序信息
+  const a = createHash("sha256").update(expected).digest();
+  const b = createHash("sha256").update(provided).digest();
+  if (a.length === b.length && timingSafeEqual(a, b)) return null;
+
+  return Response.json(
+    { error: "未授权：请在页面设置中填入访问口令（ACCESS_TOKEN）" },
+    { status: 401 },
+  );
+}
 
 /**
  * POST /api/agent
@@ -10,6 +31,9 @@ export const maxDuration = 300;
  *   {type:"status"|"step"|"final"|"report"|"error"}
  */
 export async function POST(req: Request) {
+  const unauthorized = checkAuth(req);
+  if (unauthorized) return unauthorized;
+
   let body: any = {};
   try {
     body = await req.json();
