@@ -11,29 +11,32 @@
 - **手写 ReAct 执行循环**：决策 → 工具调用 → 观察 → 再决策，不依赖任何 Agent 框架，便于理解并讲清 function calling 底层原理。
 - **8 个浏览器工具**：`goto` / `getSnapshot` / `getAccessibilityTree` / `click` / `type` / `press` / `assertText` / `assertCount`，覆盖导航、观察、交互、断言。
 - **可访问性树 + 精简元素快照**：用 `getSnapshot` 给模型提供「元素 → 建议 CSS 选择器」的映射，比塞整段 DOM 省 token、定位更稳。
-- **实时过程可视化**：SSE/NDJSON 流式推送每一步的工具名、参数、结果与页面截图，把黑盒推理变成可调试的产品界面。
+- **任务记忆（RAG）**：每次任务结束，把「成败 + 踩坑过程」确定性摘要成经验，用本地多语言 embedding 向量化入库；下次任务先按语义检索 top-k 历史经验注入 prompt。embedding 走本地 ONNX 模型，不走 API。
+- **实时过程可视化**：NDJSON 流式推送每一步的工具名、参数、结果与页面截图，记忆的召回/写入也在界面上可见，把黑盒推理变成可调试的产品界面。
 - **安全护栏**：最大步数、整体超时、域名白名单。
 - **成本可观测**：报告页展示步数、耗时、prompt/completion token 数。
 
 ## 架构
 
+```mermaid
+flowchart TD
+  U[用户: URL + 自然语言任务] --> F[Next.js 工作台]
+  F -->|POST /api/agent NDJSON 流| A[ReAct 循环 lib/agent.ts]
+  A -->|chat + tools| M[LLM DeepSeek / Qwen]
+  A -->|executeTool| P[Playwright 无头浏览器]
+  P --> W[目标网页]
+  A -.开跑前.-> R["记忆召回 lib/memory.ts<br/>本地 embedding → 余弦相似度 → top-k"]
+  R -.相似经验注入 prompt.-> A
+  A -.跑完后.-> S[经验摘要入库 data/memory.json]
+  G[护栏: 白名单 / 最大步数 / 超时] -.约束.-> A
 ```
-前端 (Next.js App Router, "use client")
-  │  输入 URL + 自然语言任务
-  │  fetch("/api/agent") → 读 NDJSON 流
-  ▼
-API 路由 (app/api/agent/route.ts)
-  │  返回 ReadableStream，逐行 JSON 事件
-  ▼
-Agent 执行器 (lib/agent.ts)
-  │  启动 headless Chromium
-  │  手写 ReAct 循环（最多 MAX_STEPS 轮）
-  │    1. chat(messages, toolSchemas)  → LLM 决策
-  │    2. 无 tool_calls → 输出最终结论
-  │    3. 有 tool_calls → executeTool() → 截图 → 结果压回 messages
-  ├─ lib/llm.ts         OpenAI 兼容客户端（DeepSeek / Qwen）
-  ├─ lib/tools.ts       8 个工具的 schema + 执行器
-  └─ lib/guardrails.ts  域名白名单
+
+```
+lib/agent.ts       ReAct 循环 + 截图 + 护栏 + 记忆召回/写入的接入点
+lib/llm.ts         OpenAI 兼容客户端（DeepSeek / Qwen）
+lib/tools.ts       8 个工具的 schema + 执行器
+lib/guardrails.ts  域名白名单
+lib/memory.ts      任务记忆：本地 embedding + 向量存储 + top-k 检索（RAG）
 ```
 
 ## 快速开始
@@ -75,15 +78,36 @@ npm run verify              # 跑全部用例
 npm run verify -- --only 2  # 只跑第 2 条
 ```
 
-当前三条用例的实测结果（`deepseek-chat`，`temperature: 0`）：
+当前四条用例的实测结果（`deepseek-chat`，`temperature: 0`）：
 
 | 用例 | 步数 | 耗时 | prompt | completion | 断言 | 结果 |
 | --- | --- | --- | --- | --- | --- | --- |
-| 添加 3 条待办 → 断言数量为 3 | 10 | 9.3s | 13430 | 494 | 2/2 | 通过 |
-| 添加 1 条指定内容 → 断言文本存在 | 6 | 4.5s | 6658 | 278 | 2/2 | 通过 |
-| 什么都不加 → 断言数量为 0 | 3 | 3.2s | 3690 | 130 | 1/1 | 通过 |
+| 添加 3 条待办 → 断言数量为 3 | 10 | 8.4s | 13236 | 455 | 2/2 | 通过 |
+| 添加 1 条指定内容 → 断言文本存在 | 6 | 4.5s | 6598 | 259 | 2/2 | 通过 |
+| 什么都不加 → 断言数量为 0 | 4 | 3.2s | 5180 | 182 | 1/1 | 通过 |
+| 记忆收益：同任务连跑两次，第二次命中经验 | 10 | 8.1s | 14469 | 455 | 2/2 | 通过 |
 
-通过率 **3/3**，总计 24680 token。
+通过率 **4/4**。
+
+## 任务记忆（RAG）
+
+Agent 不是每次都从零开始。每次任务结束后，运行过程被**确定性摘要**成一条经验入库；
+下次跑新任务前，先按任务语义检索相似经验注入 prompt。
+
+三个刻意的设计决定（面试常问）：
+
+1. **embedding 用本地 ONNX 模型（paraphrase-multilingual-MiniLM，384 维），不走 API。**
+   verify 要可复现，不能把测试成本和随机性绑在第三方接口上；选多语言模型是因为
+   任务描述是中文——英文模型在中文上语义区分度太差，改写任务相似度 0.45、
+   无关任务也能到 0.5，阈值没法设；多语言模型实测改写任务 0.70~0.96、无关任务 ≤0.42。
+2. **经验摘要不调 LLM，纯规则生成。** 记忆写入本身不该再花钱、再引入不确定性，
+   否则「记忆让结果变好」就没法归因。
+3. **检索键只用任务文本，教训只作为内容存取。** 踩过的坑：把教训拼进 embedding
+   会稀释任务语义——实测同任务相似度从 0.92 掉到 0.46，直接跌破召回阈值。
+
+存储层是 JSON 文件 + 余弦相似度，检索管线（向量化 → 打分 → top-k 过滤）和向量库
+完全一致；量大了把这一层换成 sqlite-vec / Qdrant，上游不用动。记忆模块任何失败
+都降级为「无记忆」，绝不影响任务本身。
 
 判定标准是「模型声明 `STATUS: DONE` + 所有断言 pass」，不看模型自己的措辞有多自信。
 
@@ -109,12 +133,13 @@ webpilot/
 │  ├─ page.tsx             # 工作台 UI（任务输入 + 时间线 + 报告）
 │  └─ globals.css
 ├─ lib/
-│  ├─ agent.ts             # ReAct 循环 + 截图 + 护栏
+│  ├─ agent.ts             # ReAct 循环 + 截图 + 护栏 + 记忆接入
 │  ├─ llm.ts               # LLM 客户端
 │  ├─ tools.ts             # 工具 schema + 执行器
-│  └─ guardrails.ts        # 域名白名单
+│  ├─ guardrails.ts        # 域名白名单
+│  └─ memory.ts            # 任务记忆（RAG）：本地 embedding + 向量检索
 ├─ public/todo.html        # 内置演示站点
-├─ scripts/verify.ts       # 可复现验证（npm run verify）
+├─ scripts/verify.ts       # 可复现验证（npm run verify，含记忆收益用例）
 ├─ .env.example
 └─ package.json
 ```
@@ -131,8 +156,9 @@ webpilot/
 
 - 基于 TypeScript + Playwright 独立实现自然语言驱动的浏览器自动化 Agent，手写 ReAct 执行循环（规划 → 工具调用 → 观察 → 重试），支持多步骤任务自动执行与失败重试。
 - 封装 8 个浏览器工具（导航、元素快照、可访问性树、点击、输入、按键、文本断言、数量断言），以可访问性树 + 选择器快照作为观察信号，降低 token 成本并提升元素定位稳定性。
-- 基于 Next.js + NDJSON 流式响应实现 Agent 执行过程实时可视化：步骤时间线、截图回放、工具参数/结果查看，将黑盒推理过程变为可调试的产品界面。
-- 内置最大步数、整体超时、域名白名单等护栏，并用典型用例验证任务通过率与耗时。
+- 设计任务记忆（RAG）：本地多语言 embedding + 向量存储 + top-k 语义检索，任务经验确定性摘要后跨任务复用；检索键与内容分离、失败静默降级，四条评估用例通过率 4/4。
+- 基于 Next.js + NDJSON 流式响应实现 Agent 执行过程实时可视化：步骤时间线、截图回放、记忆召回/写入状态展示，将黑盒推理过程变为可调试的产品界面。
+- 内置最大步数、整体超时、域名白名单等护栏，并用可复现评估脚本持续验证任务通过率、步数与 token 成本。
 
 ## 部署说明（重要）
 
@@ -150,8 +176,8 @@ webpilot/
 
 ## 下一步（进阶，做进 README 的「未来工作」即可）
 
-- 失败反思：失败后让 LLM 总结原因再重试（Reflexion 思路）。
-- 记忆：用向量库存历史失败与页面元素知识，二次尝试提成功率。
-- 评估集扩容：`npm run verify` 目前 3 条，往 20+ 条扩，并加上重试率、幻觉率统计。
+- 评估集扩容：`npm run verify` 目前 4 条，往 20+ 条扩，并加上重试率、幻觉率统计。
+- 保险场景差异化：把 Demo 场景扩一个模拟理赔报案表单页（`public/claim.html`），贴近目标行业。
 - 可观测：接 Langfuse 记录完整 trace。
 - 任务队列：Redis + BullMQ 支撑并发任务。
+- 存储升级：记忆量大后把 JSON 存储换成 sqlite-vec / Qdrant（检索管线不变）。
