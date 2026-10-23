@@ -10,6 +10,7 @@
 
 - **手写 ReAct 执行循环**：决策 → 工具调用 → 观察 → 再决策，不依赖任何 Agent 框架，便于理解并讲清 function calling 底层原理。
 - **9 个浏览器工具**：`goto` / `getSnapshot` / `getAccessibilityTree` / `click` / `type` / `select` / `press` / `assertText` / `assertCount`，覆盖导航、观察、交互、断言。
+- **MCP 工具生态**：同一套工具以 MCP Server 形式对外提供（`npm run mcp`，stdio 传输），任何 MCP 客户端可复用；Agent 又可作为 MCP Host 连接外部 MCP server，外部工具以 `mcp__<server>__<tool>` 并入工具箱、与内置工具平权（见下方「MCP 工具生态」）。
 - **失败反思重试（Reflexion）**：断言未通过或工具报错时，注入反思消息要求模型先分析原因再换策略，禁止原样重试（上限 3 次）。
 - **可访问性树 + 精简元素快照**：用 `getSnapshot` 给模型提供「元素 → 建议 CSS 选择器」的映射，比塞整段 DOM 省 token、定位更稳。
 - **任务记忆（RAG）**：每次任务结束，把「成败 + 踩坑过程」确定性摘要成经验，用本地多语言 embedding 向量化入库；下次任务先按语义检索 top-k 历史经验注入 prompt。embedding 走本地 ONNX 模型，不走 API。
@@ -149,6 +150,34 @@ Agent 不是每次都从零开始。每次任务结束后，运行过程被**确
 >    不再调用工具 —— 于是失败被报成「通过」。改成优先信模型声明的 `STATUS:` 行，没有
 >    就退回「有没有失败断言」。
 
+## MCP 工具生态
+
+WebPilot 在 MCP 架构里有两个角色（协议：Model Context Protocol，stdio 传输）：
+
+**1. MCP Server —— 工具协议化**（`mcp/server.ts`，`npm run mcp`）
+
+把 9 个浏览器工具原样暴露为 MCP tools。工具执行复用 `lib/tools.ts` 的同一个 `executeTool` —— 协议层只是工具的另一种「壳」，业务逻辑零复制。任何 MCP 客户端（Claude Desktop、Inspector、其他 Agent）都能直接用：
+
+```bash
+npm run mcp                                            # 启动 stdio server
+npx @modelcontextprotocol/inspector npm run mcp        # 调试面板
+npm run mcp:e2e                                        # 离线自检：Host 连自己 → 列工具 → 导航 → 断言
+```
+
+**2. MCP Host —— 连接外部工具**（`lib/mcp.ts`）
+
+Agent 循环启动时读取 `WEBPILOT_MCP_SERVERS`（JSON 数组），连接外部 MCP server 并把它们的工具并入工具箱：
+
+```json
+[{ "name": "browser", "command": "npx", "args": ["tsx", "mcp/server.ts"] }]
+```
+
+- 外部工具名加 `mcp__<server>__<tool>` 前缀，与内置工具（`goto`/`click`…）不冲突，模型也能一眼看出工具来源；
+- MCP 的 `inputSchema` 与 function calling 的 `parameters` 同为 JSON Schema，直接透传；
+- 连接/列举失败只告警并降级为「仅内置工具」，外部工具是增强不是依赖。
+
+设计取舍：内置工具保持「函数直调」（低延迟、断言计数等循环逻辑强耦合），MCP 作为工具的**对外标准接口**与**扩展入口**——两者复用同一份执行器，不存在两套实现。
+
 ## 目录结构
 
 ```
@@ -164,6 +193,7 @@ webpilot/
 │  ├─ tools.ts             # 工具 schema + 执行器
 │  ├─ guardrails.ts        # 域名白名单
 │  └─ memory.ts            # 任务记忆（RAG）：本地 embedding + 向量检索
+├─ mcp/server.ts           # MCP Server：9 个工具的 stdio 协议层
 ├─ public/todo.html        # 内置演示站点
 ├─ public/claim.html       # 模拟保险理赔报案页（数据纯虚构）
 ├─ python/agent_loop.py    # 同一 ReAct 循环的 Python 版（跨语言对照 + 自检）

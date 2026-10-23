@@ -3,6 +3,7 @@ import { chat } from "./llm";
 import { executeTool, toolSchemas } from "./tools";
 import { isAllowedUrl } from "./guardrails";
 import { recall, store } from "./memory";
+import { callMcpTool, closeAll, connectMcpServers, type McpConnection } from "./mcp";
 
 const MAX_STEPS = Number(process.env.MAX_STEPS || 10);
 const OVERALL_TIMEOUT_MS = Number(process.env.OVERALL_TIMEOUT_MS || 180000);
@@ -90,6 +91,20 @@ export async function runAgent(opts: {
     // 记忆召回任何问题都不该挡住任务
   }
 
+  // ---- MCP 工具生态：连外部 MCP server，外部工具与内置工具平权 ----
+  // 失败只告警降级为「仅内置工具」，绝不阻断任务。
+  let mcpConns: McpConnection[] = [];
+  try {
+    mcpConns = await connectMcpServers();
+    if (mcpConns.length > 0) {
+      const total = mcpConns.reduce((n, c) => n + c.schemas.length, 0);
+      onEvent({ type: "status", message: `已连接 ${mcpConns.length} 个 MCP server（${total} 个外部工具可用）` });
+    }
+  } catch (err) {
+    console.error("[mcp] 连接失败（降级为仅内置工具）：", err);
+  }
+  const allSchemas = [...toolSchemas, ...mcpConns.flatMap((c) => c.schemas)];
+
   try {
     // 可选：初始导航到用户指定的 URL
     if (url) {
@@ -125,7 +140,7 @@ export async function runAgent(opts: {
 
       onEvent({ type: "status", message: `第 ${iter + 1} 轮：让模型决策下一步...` });
 
-      const response = await chat(messages, toolSchemas);
+      const response = await chat(messages, allSchemas);
       if (response.usage) {
         promptTokens += response.usage.prompt_tokens ?? 0;
         completionTokens += response.usage.completion_tokens ?? 0;
@@ -172,7 +187,20 @@ export async function runAgent(opts: {
 
         let result: any;
         try {
-          result = await executeTool(name, args, page);
+          if (name.startsWith("mcp__")) {
+            // 外部 MCP 工具：按前缀找到对应 server 连接，raw 名反查后走协议调用
+            const conn = mcpConns.find((c) => name.startsWith(`mcp__${c.serverName}__`));
+            let rawName: string | undefined;
+            for (const [raw, prefixed] of conn?.toolNames ?? []) {
+              if (prefixed === name) rawName = raw;
+            }
+            result =
+              conn && rawName
+                ? await callMcpTool(conn, rawName, args)
+                : { ok: false, error: `未找到 MCP 工具：${name}` };
+          } else {
+            result = await executeTool(name, args, page);
+          }
         } catch (err: any) {
           result = { ok: false, error: String(err?.message ?? err) };
         }
@@ -250,6 +278,7 @@ export async function runAgent(opts: {
   } catch (err: any) {
     onEvent({ type: "error", message: String(err?.message ?? err) });
   } finally {
+    await closeAll(mcpConns);
     await browser.close();
   }
 }
