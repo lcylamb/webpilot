@@ -257,6 +257,11 @@ docker compose up --build   # → http://localhost:3000
 Agent 的浏览器去哪，拦不住别人直接调 API——没有口令，任何拿到链接的人都在烧你的
 LLM 额度。
 
+部署态同时启用**每日配额**（SQLite 持久化在 `data/usage.db`，重启不丢）：每个口令
+默认 20 次任务 / 200k token，每个 IP 默认 50 次任务，超限返回 429。额度通过
+`DAILY_TASK_LIMIT` / `DAILY_TOKEN_LIMIT` / `IP_DAILY_TASK_LIMIT` 调整；本地开发
+不设 `ACCESS_TOKEN`，所有限制不生效。
+
 ## Roadmap
 
 - 评估集扩容：`npm run verify` 目前 8 条，往 20+ 条扩，并加上重试率、幻觉率统计。

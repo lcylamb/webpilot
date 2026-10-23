@@ -105,6 +105,15 @@ export default function Home() {
         if (res.status === 401) {
           throw new Error("需要访问口令：服务端开启了 ACCESS_TOKEN 校验，请在下方填入口令");
         }
+        if (res.status === 429) {
+          let msg = "今日用量已达上限";
+          try {
+            msg = (await res.json())?.error ?? msg;
+          } catch {
+            // ignore
+          }
+          throw new Error(msg);
+        }
         throw new Error(`请求失败 (${res.status})`);
       }
 

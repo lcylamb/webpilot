@@ -1,5 +1,6 @@
 import { timingSafeEqual, createHash } from "crypto";
 import { runAgent } from "@/lib/agent";
+import { checkAndReserve, addTokenUsage, quotaEnabled } from "@/lib/quota";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -8,20 +9,23 @@ export const maxDuration = 300;
  * 访问控制：设置了 ACCESS_TOKEN 时，请求必须带 x-webpilot-token 头。
  * 公网部署时用它挡住陌生流量烧 LLM 额度；本地开发不设即不启用。
  */
-function checkAuth(req: Request): Response | null {
+function readToken(req: Request): { ok: true; token: string } | { ok: false; response: Response } {
   const expected = process.env.ACCESS_TOKEN?.trim();
-  if (!expected) return null;
+  if (!expected) return { ok: true, token: "" };
 
   const provided = req.headers.get("x-webpilot-token") ?? "";
   // 先哈希再比较，等长且不泄露时序信息
   const a = createHash("sha256").update(expected).digest();
   const b = createHash("sha256").update(provided).digest();
-  if (a.length === b.length && timingSafeEqual(a, b)) return null;
+  if (a.length === b.length && timingSafeEqual(a, b)) return { ok: true, token: provided };
 
-  return Response.json(
-    { error: "未授权：请在页面设置中填入访问口令（ACCESS_TOKEN）" },
-    { status: 401 },
-  );
+  return {
+    ok: false,
+    response: Response.json(
+      { error: "未授权：请在页面设置中填入访问口令（ACCESS_TOKEN）" },
+      { status: 401 },
+    ),
+  };
 }
 
 /**
@@ -31,8 +35,8 @@ function checkAuth(req: Request): Response | null {
  *   {type:"status"|"step"|"final"|"report"|"error"}
  */
 export async function POST(req: Request) {
-  const unauthorized = checkAuth(req);
-  if (unauthorized) return unauthorized;
+  const auth = readToken(req);
+  if (!auth.ok) return auth.response;
 
   let body: any = {};
   try {
@@ -48,11 +52,25 @@ export async function POST(req: Request) {
     return Response.json({ error: "task 不能为空" }, { status: 400 });
   }
 
+  // 每日配额（仅在部署态启用）：通过即预留名额，任务结束后回补 token 消耗
+  const reserved = checkAndReserve(req, auth.token);
+  if (!reserved.ok) {
+    return Response.json({ error: reserved.message }, { status: 429 });
+  }
+
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
     async start(controller) {
       const send = (event: unknown) => {
         try {
+          if (
+            event &&
+            typeof event === "object" &&
+            (event as any).type === "report"
+          ) {
+            const r = event as any;
+            addTokenUsage(reserved.identity, r.promptTokens ?? 0, r.completionTokens ?? 0);
+          }
           controller.enqueue(encoder.encode(JSON.stringify(event) + "\n"));
         } catch {
           // 客户端断开时忽略
