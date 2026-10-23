@@ -4,11 +4,11 @@
 
 用户输入一句自然语言任务（例如「打开待办页面，添加 3 条待办，并断言数量为 3」），Agent 自主规划步骤、调用 Playwright 操作浏览器、截图、断言、失败重试，最后生成报告。前端实时展示 Agent 的每一步思考、工具调用和结果。
 
-> 这是一个用于求职的实战项目骨架，定位：**LLM 应用开发 / Agent 应用工程师**。
+> 个人开源项目：不依赖任何 Agent 框架，从 ReAct 执行循环到 MCP、RAG 记忆全部手写。
 
 ## 核心亮点
 
-- **手写 ReAct 执行循环**：决策 → 工具调用 → 观察 → 再决策，不依赖任何 Agent 框架，便于理解并讲清 function calling 底层原理。
+- **手写 ReAct 执行循环**：决策 → 工具调用 → 观察 → 再决策，不依赖任何 Agent 框架。
 - **9 个浏览器工具**：`goto` / `getSnapshot` / `getAccessibilityTree` / `click` / `type` / `select` / `press` / `assertText` / `assertCount`，覆盖导航、观察、交互、断言。
 - **MCP 工具生态**：同一套工具以 MCP Server 形式对外提供（`npm run mcp`，stdio 传输），任何 MCP 客户端可复用；Agent 又可作为 MCP Host 连接外部 MCP server，外部工具以 `mcp__<server>__<tool>` 并入工具箱、与内置工具平权（见下方「MCP 工具生态」）。
 - **失败反思重试（Reflexion）**：断言未通过或工具报错时，注入反思消息要求模型先分析原因再换策略，禁止原样重试（上限 3 次）。
@@ -91,7 +91,7 @@ npm run verify              # 跑全部用例
 npm run verify -- --only 2  # 只跑第 2 条
 ```
 
-当前七条用例的实测结果（`deepseek-chat`，`temperature: 0`，2026-10-23）：
+当前八条用例的实测结果（`deepseek-chat`，`temperature: 0`，2026-10-23）：
 
 | 用例 | 步数 | 耗时 | prompt | completion | 断言 | 结果 |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -139,7 +139,7 @@ verify 对它单独判定——至少失败一次（证明走了失败路径）�
 Agent 不是每次都从零开始。每次任务结束后，运行过程被**确定性摘要**成一条经验入库；
 下次跑新任务前，先按任务语义检索相似经验注入 prompt。
 
-三个刻意的设计决定（面试常问）：
+三个刻意的设计决定：
 
 1. **embedding 用本地 ONNX 模型（paraphrase-multilingual-MiniLM，384 维），不走 API。**
    verify 要可复现，不能把测试成本和随机性绑在第三方接口上；选多语言模型是因为
@@ -231,7 +231,7 @@ webpilot/
 python python/agent_loop.py --selftest   # 不联网验证循环机制
 ```
 
-## 面试必讲清的原理
+## 核心机制：function calling 循环是怎么跑的
 
 1. **function calling 底层机制**：模型输出 `tool_calls`（含 `id` + `function.name` + JSON `arguments`）→ 你执行工具 → 把结果以 `{role:"tool", tool_call_id, content}` 压回 `messages` → 再问模型。循环直到模型不再输出 `tool_calls`。
 2. **循环如何停止**：靠 `MAX_STEPS` 上限 + 模型主动选择不再调用工具（`tool_choice:"auto"` 时，模型认为完成会只回文本）。
@@ -239,29 +239,19 @@ python python/agent_loop.py --selftest   # 不联网验证循环机制
 4. **稳定性**：工具参数用 JSON Schema 约束、`temperature:0`、失败重试、断言校验。
 5. **安全护栏**：域名白名单防止被诱导访问未授权站点、最大步数防止无限烧 token。
 
-## 简历 bullet（只写你真实做了的）
-
-- 基于 TypeScript + Playwright 独立实现自然语言驱动的浏览器自动化 Agent，手写 ReAct 执行循环（规划 → 工具调用 → 观察 → 重试），支持多步骤任务自动执行与失败恢复。
-- 封装 9 个浏览器工具（导航、元素快照、可访问性树、点击、输入、下拉选择、按键、文本断言、数量断言），以可访问性树 + 选择器快照作为观察信号，降低 token 成本并提升元素定位稳定性。
-- 实现失败反思重试（Reflexion）：断言失败/工具报错后强制模型分析原因并换策略，实测 Agent 能自主定位「预期值错误」并恢复；用「错误保单号被校验拦截 → 读懂提示 → 修正重提」的保险场景用例验证。
-- 设计任务记忆（RAG）：本地多语言 embedding + 向量存储 + top-k 语义检索，任务经验确定性摘要后跨任务复用；检索键与内容分离、失败静默降级。
-- 基于 Next.js + NDJSON 流式响应实现执行过程实时可视化（步骤时间线、截图回放、记忆召回/反思状态），内置域名白名单等护栏，可复现评估脚本覆盖 8 条用例、通过率 8/8。
-
-## 部署说明（重要）
+## 部署说明
 
 **不要用 Vercel 部署这个项目。** Playwright 需要无头 Chromium（几百 MB），Vercel 的 serverless 函数有体积上限和时长上限（免费版默认 10s），多步浏览器任务会超时/被砍。
 
-正确做法：本周末先本地跑通，面试时现场开本地服务，或用 ngrok / Cloudflare Tunnel 开临时公网链接。真到部署，用 Railway / Fly.io / Render / 便宜 VPS 这类能跑长时进程 + 大镜像的平台。域名完全不用买。
+正确做法：本地跑通即可演示；需要临时公网链接时用 ngrok / Cloudflare Tunnel。真到部署，用 Railway / Fly.io / Render / 便宜 VPS 这类能跑长时进程 + 大镜像的平台。
 
 ## 避坑
 
 - 别一上来上 LangGraph / 多 Agent —— 先把手写循环吃透。
 - 别做通用聊天套壳 —— 这个项目的差异点是「会动手操作 + 过程可视化」。
 - 别爬未授权网站 —— 用内置的 `public/todo.html`、TodoMVC、自己的页面做测试。
-- 一定要录一个 1-2 分钟的 demo 视频，简历里直接放链接。
-- 开源到 GitHub，写清楚 README + 架构图。
 
-## 下一步（进阶，做进 README 的「未来工作」即可）
+## Roadmap
 
 - 评估集扩容：`npm run verify` 目前 8 条，往 20+ 条扩，并加上重试率、幻觉率统计。
 - 可观测：接 Langfuse 记录完整 trace。
