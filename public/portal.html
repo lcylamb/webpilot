@@ -1,0 +1,277 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>保险门户 Demo</title>
+  <style>
+    :root { color-scheme: light; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: #f5f6fa;
+      color: #1f2430;
+      display: flex;
+      justify-content: center;
+      padding: 60px 16px;
+    }
+    main {
+      width: 560px;
+      max-width: 100%;
+      background: #fff;
+      border-radius: 14px;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.08);
+      padding: 28px;
+    }
+    h1 { font-size: 22px; margin: 0 0 6px; }
+    .sub { margin: 0 0 20px; color: #6b7280; font-size: 13px; }
+    label { display: block; margin: 14px 0 6px; font-size: 13px; color: #374151; font-weight: 600; }
+    input, select {
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid #d5dae4;
+      border-radius: 8px;
+      font-size: 14px;
+      background: #fff;
+      box-sizing: border-box;
+    }
+    button {
+      margin-top: 20px;
+      width: 100%;
+      padding: 12px;
+      border: none;
+      border-radius: 8px;
+      background: #2f7ef7;
+      color: #fff;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .error {
+      margin-top: 14px;
+      padding: 10px 12px;
+      border-radius: 8px;
+      background: #fdecec;
+      border: 1px solid #f5c2c2;
+      color: #b42318;
+      font-size: 13px;
+      white-space: pre-line;
+    }
+    .hidden { display: none; }
+    .tabs { display: flex; gap: 8px; margin-bottom: 16px; }
+    .tab {
+      flex: 1;
+      margin: 0;
+      width: auto;
+      padding: 10px;
+      border-radius: 8px;
+      background: #eef1f6;
+      color: #374151;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .tab.active { background: #2f7ef7; color: #fff; }
+    .badge {
+      display: inline-block;
+      margin: 12px 0;
+      padding: 6px 16px;
+      border-radius: 999px;
+      background: #e7f7ee;
+      border: 1px solid #b6e2c8;
+      color: #027a48;
+      font-weight: 700;
+      font-size: 15px;
+    }
+    .badge.paid { background: #fff6e6; border-color: #f4d8a0; color: #925b00; }
+    table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 13px; }
+    td { padding: 8px 10px; border-bottom: 1px solid #eef0f4; text-align: left; }
+    td:first-child { color: #6b7280; width: 40%; }
+    .who { margin: 0 0 16px; color: #374151; font-size: 13px; }
+    .who b { color: #027a48; }
+    footer { margin-top: 18px; color: #9aa1ad; font-size: 12px; text-align: center; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>安心保险门户</h1>
+    <p class="sub">登录后可进行理赔报案与理赔进度查询。</p>
+
+    <!-- ===== 登录门：账号密码错误会明确提示 ===== -->
+    <div id="login-view">
+      <form id="login-form">
+        <label for="login-user">账号</label>
+        <input id="login-user" placeholder="请输入工号或手机号" />
+        <label for="login-pass">密码</label>
+        <input id="login-pass" type="password" placeholder="请输入密码" />
+        <button type="button" id="login-btn">登录</button>
+        <div class="error hidden" id="login-error"></div>
+      </form>
+    </div>
+
+    <!-- ===== 登录成功后的门户主界面 ===== -->
+    <div id="app-view" class="hidden">
+      <p class="who">当前用户：<b id="who">—</b>（理赔专员）</p>
+
+      <div class="tabs">
+        <button type="button" class="tab active" id="tab-report">理赔报案</button>
+        <button type="button" class="tab" id="tab-query">进度查询</button>
+      </div>
+
+      <!-- 报案 Tab：与 claim.html 相同的表单校验规则 -->
+      <div id="report-pane">
+        <form id="claim-form">
+          <label for="reporter-name">报案人姓名</label>
+          <input id="reporter-name" placeholder="例如：张三" />
+          <label for="policy-no">保单号（格式 PC-年份-6位数字）</label>
+          <input id="policy-no" placeholder="例如：PC-2026-013872" />
+          <label for="loss-date">出险日期（yyyy-mm-dd）</label>
+          <input id="loss-date" placeholder="例如：2026-10-01" />
+          <label for="loss-reason">出险原因</label>
+          <select id="loss-reason">
+            <option value="">请选择…</option>
+            <option value="collision">车辆碰撞</option>
+            <option value="property">家庭财产损失</option>
+            <option value="travel">旅行延误</option>
+            <option value="other">其他</option>
+          </select>
+          <label for="claim-amount">预估损失金额（元）</label>
+          <input id="claim-amount" placeholder="例如：3500" />
+          <button type="button" id="submit-btn">提交报案</button>
+          <div class="error hidden" id="form-error"></div>
+        </form>
+        <div id="result" class="hidden">
+          <div class="badge">已受理</div>
+          <p class="sub" style="margin:0">受理号：<b id="claim-no"></b></p>
+          <table id="result-summary"></table>
+        </div>
+      </div>
+
+      <!-- 查询 Tab：按受理号查状态；演示数据写死三条 -->
+      <div id="query-pane" class="hidden">
+        <form id="query-form">
+          <label for="claim-no-input">受理号（格式 CLM-6位数字）</label>
+          <input id="claim-no-input" placeholder="例如：CLM-202601" />
+          <button type="button" id="query-btn">查询</button>
+          <div class="error hidden" id="query-error"></div>
+        </form>
+        <div id="query-result" class="hidden">
+          <div class="badge" id="query-status"></div>
+          <table id="query-detail"></table>
+        </div>
+      </div>
+    </div>
+
+    <footer>模拟页面 · 所有数据（含演示账号）均为虚构，仅用于自动化演示</footer>
+  </main>
+
+  <script>
+    function $(id) { return document.getElementById(id); }
+    function showErr(id, text) { var el = $(id); el.textContent = text; el.classList.remove('hidden'); }
+    function hideErr(id) { $(id).classList.add('hidden'); }
+
+    // ===== 登录 =====
+    // 演示账号（虚构）：claims_ops / Fs#2026demo —— 写在页脚说明之上，供自动化测试使用
+    var ACCOUNTS = { 'claims_ops': 'Fs#2026demo', 'wang.li': 'Wl#2026demo' };
+
+    $('login-btn').addEventListener('click', function () {
+      var user = $('login-user').value.trim();
+      var pass = $('login-pass').value;
+      if (!user || !pass) {
+        showErr('login-error', '· 账号和密码不能为空');
+        return;
+      }
+      if (ACCOUNTS[user] !== pass) {
+        showErr('login-error', '· 账号或密码错误，请重新输入');
+        return;
+      }
+      hideErr('login-error');
+      $('who').textContent = user;
+      $('login-view').classList.add('hidden');
+      $('app-view').classList.remove('hidden');
+    });
+
+    // ===== Tab 切换 =====
+    $('tab-report').addEventListener('click', function () {
+      $('tab-report').classList.add('active');
+      $('tab-query').classList.remove('active');
+      $('report-pane').classList.remove('hidden');
+      $('query-pane').classList.add('hidden');
+    });
+    $('tab-query').addEventListener('click', function () {
+      $('tab-query').classList.add('active');
+      $('tab-report').classList.remove('active');
+      $('query-pane').classList.remove('hidden');
+      $('report-pane').classList.add('hidden');
+    });
+
+    // ===== 报案（与 claim.html 相同规则）=====
+    var form = $('claim-form');
+
+    function val(id) { return $(id).value.trim(); }
+
+    $('submit-btn').addEventListener('click', function () {
+      var errors = [];
+      var name = val('reporter-name');
+      var policy = val('policy-no');
+      var date = val('loss-date');
+      var reason = $('loss-reason');
+      var amount = val('claim-amount');
+
+      if (!name) errors.push('· 报案人姓名不能为空');
+      if (!/^PC-\d{4}-\d{6}$/.test(policy)) errors.push('· 保单号格式不正确，应为 PC-年份-6位数字，例如 PC-2026-013872');
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) errors.push('· 出险日期格式不正确，应为 yyyy-mm-dd');
+      if (!reason.value) errors.push('· 请选择出险原因');
+      if (!(Number(amount) > 0)) errors.push('· 预估损失金额必须大于 0');
+
+      if (errors.length > 0) {
+        showErr('form-error', errors.join('\n'));
+        return;
+      }
+
+      hideErr('form-error');
+      var claimNo = 'CLM-' + String(Math.floor(100000 + Math.random() * 900000));
+      var reasonText = reason.options[reason.selectedIndex].text;
+
+      form.classList.add('hidden');
+      $('result').classList.remove('hidden');
+      $('claim-no').textContent = claimNo;
+      $('result-summary').innerHTML =
+        '<tr><td>报案人</td><td>' + name + '</td></tr>' +
+        '<tr><td>保单号</td><td>' + policy + '</td></tr>' +
+        '<tr><td>出险日期</td><td>' + date + '</td></tr>' +
+        '<tr><td>出险原因</td><td>' + reasonText + '</td></tr>' +
+        '<tr><td>预估损失金额</td><td>¥' + amount + '</td></tr>';
+    });
+
+    // ===== 进度查询：演示数据 =====
+    var CLAIMS = {
+      'CLM-202601': { status: '已受理', rows: [['投保人', '李某某'], ['保单号', 'PC-2026-013872'], ['出险原因', '车辆碰撞'], ['预估金额', '¥3,500'], ['当前环节', '材料审核']] },
+      'CLM-202602': { status: '已支付', rows: [['投保人', '王某某'], ['保单号', 'PC-2026-021105'], ['出险原因', '家庭财产损失'], ['赔付金额', '¥12,800'], ['到账日期', '2026-09-28']] },
+      'CLM-202603': { status: '已受理', rows: [['投保人', '赵某某'], ['保单号', 'PC-2026-004910'], ['出险原因', '旅行延误'], ['预估金额', '¥860'], ['当前环节', '查勘定损']] }
+    };
+
+    $('query-btn').addEventListener('click', function () {
+      var no = val('claim-no-input');
+      if (!/^CLM-\d{6}$/.test(no)) {
+        showErr('query-error', '· 受理号格式不正确，应为 CLM-6位数字，例如 CLM-202601');
+        return;
+      }
+      var claim = CLAIMS[no];
+      if (!claim) {
+        showErr('query-error', '· 未找到受理号 ' + no + '，请核对后重试');
+        return;
+      }
+      hideErr('query-error');
+      $('query-result').classList.remove('hidden');
+      var badge = $('query-status');
+      badge.textContent = claim.status;
+      badge.classList.toggle('paid', claim.status === '已支付');
+      $('query-detail').innerHTML = claim.rows
+        .map(function (r) { return '<tr><td>' + r[0] + '</td><td>' + r[1] + '</td></tr>'; })
+        .join('');
+    });
+  </script>
+</body>
+</html>
