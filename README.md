@@ -36,7 +36,7 @@ flowchart TD
 ```
 lib/agent.ts       ReAct 循环 + 截图 + 护栏 + 记忆召回/写入的接入点
 lib/llm.ts         OpenAI 兼容客户端（DeepSeek / Qwen）
-lib/tools.ts       8 个工具的 schema + 执行器
+lib/tools.ts       9 个工具的 schema + 执行器
 lib/guardrails.ts  域名白名单
 lib/memory.ts      任务记忆：本地 embedding + 向量存储 + top-k 检索（RAG）
 ```
@@ -233,23 +233,24 @@ python python/agent_loop.py --selftest   # 不联网验证循环机制
 
 ## 核心机制：function calling 循环是怎么跑的
 
-1. **function calling 底层机制**：模型输出 `tool_calls`（含 `id` + `function.name` + JSON `arguments`）→ 你执行工具 → 把结果以 `{role:"tool", tool_call_id, content}` 压回 `messages` → 再问模型。循环直到模型不再输出 `tool_calls`。
+1. **function calling 底层机制**：模型输出 `tool_calls`（含 `id` + `function.name` + JSON `arguments`）→ 程序执行工具 → 把结果以 `{role:"tool", tool_call_id, content}` 压回 `messages` → 再问模型。循环直到模型不再输出 `tool_calls`。
 2. **循环如何停止**：靠 `MAX_STEPS` 上限 + 模型主动选择不再调用工具（`tool_choice:"auto"` 时，模型认为完成会只回文本）。
 3. **上下文/token 管理**：每轮把工具结果拼回历史，token 随步数增长；所以观察信号要精简（用 `getSnapshot` 的可访问性/选择器快照，而不是整段 DOM + 全尺寸截图）。
 4. **稳定性**：工具参数用 JSON Schema 约束、`temperature:0`、失败重试、断言校验。
 5. **安全护栏**：域名白名单防止被诱导访问未授权站点、最大步数防止无限烧 token。
 
-## 部署说明
+## 部署
 
-**不要用 Vercel 部署这个项目。** Playwright 需要无头 Chromium（几百 MB），Vercel 的 serverless 函数有体积上限和时长上限（免费版默认 10s），多步浏览器任务会超时/被砍。
+运行依赖三样东西：常驻的 Node 进程、LLM API（DeepSeek / Qwen）、Playwright 的无头
+Chromium（几百 MB，含系统依赖）。因此不适合 Vercel 这类 serverless 平台——函数体积与
+执行时长都装不下多步浏览器任务。
 
-正确做法：本地跑通即可演示；需要临时公网链接时用 ngrok / Cloudflare Tunnel。真到部署，用 Railway / Fly.io / Render / 便宜 VPS 这类能跑长时进程 + 大镜像的平台。
+仓库自带 Dockerfile（三阶段构建，Chromium 已打进镜像，构建期不需要任何密钥）与
+`compose.yaml`，任何能跑容器的平台（Railway / Fly.io / Render / VPS）都可以直接部署：
 
-## 避坑
-
-- 别一上来上 LangGraph / 多 Agent —— 先把手写循环吃透。
-- 别做通用聊天套壳 —— 这个项目的差异点是「会动手操作 + 过程可视化」。
-- 别爬未授权网站 —— 用内置的 `public/todo.html`、TodoMVC、自己的页面做测试。
+```bash
+docker compose up --build   # → http://localhost:3000
+```
 
 ## Roadmap
 
