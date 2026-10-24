@@ -5,8 +5,9 @@
  * 「任务 → 实测结果」固定下来，每跑一次就输出步数 / 耗时 / token 成本，
  * 让「改了 prompt 之后是变好还是变差」有数字可查，而不是靠感觉。
  *
- * 脚本自己起一个静态服务器提供 public/todo.html，跑完自动关掉 ——
- * 不需要先开着 npm run dev。前提是 .env.local 里有可用的 LLM_API_KEY。
+ * 脚本自己起一个静态服务器提供 public/ 下的保险场景页（claim/portal），跑完自动关掉，
+ * 不需要先开着 npm run dev；待办类用例跑在 todomvc.com 上（不自建演示页）。
+ * 前提是 .env.local 里有可用的 LLM_API_KEY。
  *
  *   npm run verify            # 跑全部用例
  *   npm run verify -- --only 2  # 只跑第 2 条
@@ -23,7 +24,7 @@ interface Case {
   id: number;
   name: string;
   task: string;
-  /** 缺省用内置 todo 页；保险场景用例指向 claim.html */
+  /** 待办类用例指向 todomvc.com；保险场景用例指向本地 claim/portal 页 */
   url?: string;
   /** memory=true 的用例是特殊流程：同任务连跑两次，验证记忆召回收益 */
   memory?: boolean;
@@ -31,6 +32,7 @@ interface Case {
   allowFailures?: boolean;
 }
 
+const TODO_URL = "https://todomvc.com/examples/react/dist/";
 const TODO_TASK_3 = "打开这个待办事项页面，依次添加 3 条待办：买牛奶、写周报、预约体检。然后断言列表里恰好有 3 条待办。";
 
 const CASES: Case[] = [
@@ -38,21 +40,25 @@ const CASES: Case[] = [
     id: 1,
     name: "添加 3 条待办 → 断言数量为 3",
     task: TODO_TASK_3,
+    url: TODO_URL,
   },
   {
     id: 2,
     name: "添加 1 条指定内容 → 断言文本存在",
     task: "打开这个待办事项页面，添加一条待办「下午三点开会」，然后断言页面上确实出现了这条内容。",
+    url: TODO_URL,
   },
   {
     id: 3,
     name: "什么都不加 → 断言数量为 0",
     task: "打开这个待办事项页面。不要添加或修改任何内容，直接断言列表里的条目数量是 0。",
+    url: TODO_URL,
   },
   {
     id: 4,
     name: "记忆收益：同任务连跑两次，第二次应命中经验",
     task: TODO_TASK_3,
+    url: TODO_URL,
     memory: true,
   },
   {
@@ -71,6 +77,7 @@ const CASES: Case[] = [
     id: 7,
     name: "失败反思：错误预期 → 反思后换策略断言成功",
     task: "打开这个待办事项页面，先断言列表里的条目数量是 5。注意：这个预期数字可能不对，如果断言失败了，请分析失败原因（比如去数一下页面上实际的条目数），然后用正确的预期重新断言，最终以断言通过为完成标志。",
+    url: TODO_URL,
     allowFailures: true,
   },
   {
@@ -110,8 +117,8 @@ function loadEnvLocal(): void {
     const m = line.match(/^([A-Z_][A-Z0-9_]*)=(.*)$/);
     if (m && !process.env[m[1]]) process.env[m[1]] = m[2].trim();
   }
-  // 验证脚本自己提供待测页面，白名单要放行本地地址
-  process.env.ALLOWED_DOMAINS = "localhost,127.0.0.1";
+  // 本地静态服务器提供保险场景页，待办用例走 todomvc.com —— 白名单两边都放行
+  process.env.ALLOWED_DOMAINS = "localhost,127.0.0.1,todomvc.com";
 }
 
 /** 提供 public/ 下的静态文件，替代 npm run dev 的静态资源部分 */
@@ -126,7 +133,7 @@ function startStaticServer(port: number) {
 
   const server = createServer(async (req, res) => {
     const pathname = new URL(req.url ?? "/", "http://x").pathname;
-    const rel = normalize(pathname === "/" ? "/todo.html" : pathname).replace(/^(\.\.[/\\])+/, "");
+    const rel = normalize(pathname === "/" ? "/claim.html" : pathname).replace(/^(\.\.[/\\])+/, "");
     try {
       const buf = await readFile(join(root, rel));
       res.writeHead(200, { "Content-Type": types[extname(rel)] ?? "application/octet-stream" });
@@ -164,7 +171,6 @@ async function main(): Promise<void> {
   }
 
   const server = await startStaticServer(PORT);
-  const pageUrl = `http://127.0.0.1:${PORT}/todo.html`;
   const results: CaseResult[] = [];
 
   /** 跑一次任务并收集结果 + 记忆事件 */
@@ -183,7 +189,12 @@ async function main(): Promise<void> {
 
     await runAgent({
       task: c.task,
-      url: c.url ? `http://127.0.0.1:${PORT}${c.url}` : pageUrl,
+      // 用例 url 以 http 开头 = 外部站点；否则是本地静态服务器上的场景页
+      url: c.url
+        ? c.url.startsWith("http")
+          ? c.url
+          : `http://127.0.0.1:${PORT}${c.url}`
+        : TODO_URL,
       maxSteps: 16, // 校验重试 / 反思重试用例比默认流程多几步
       onEvent: (e: any) => {
         if (e.type === "step") {

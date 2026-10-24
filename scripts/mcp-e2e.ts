@@ -35,7 +35,7 @@ function startStaticServer(port: number) {
 function normalizePath(u: string): string {
   const p = decodeURIComponent(u.split("?")[0]);
   const clean = p.replace(/\.{2,}/g, "").replace(/\/+/g, "/");
-  return clean === "/" ? "/todo.html" : clean;
+  return clean === "/" ? "/claim.html" : clean;
 }
 
 async function main(): Promise<number> {
@@ -54,7 +54,7 @@ async function main(): Promise<number> {
     console.log(`✓ 列出 ${tools.length} 个工具:`, tools.map((t: any) => t.name).sort().join(", "));
     if (tools.length !== 9) throw new Error(`期望 9 个工具，实际 ${tools.length}`);
 
-    const r1: any = await client.callTool({ name: "goto", arguments: { url: `http://127.0.0.1:${PORT}/todo.html` } });
+    const r1: any = await client.callTool({ name: "goto", arguments: { url: `http://127.0.0.1:${PORT}/claim.html` } });
     const goto = JSON.parse(r1.content[0].text);
     console.log(`✓ goto -> "${goto.title}"`);
     if (!goto.ok) throw new Error("goto 失败");

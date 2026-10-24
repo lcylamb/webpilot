@@ -60,7 +60,7 @@ cp .env.example .env.local
 npm run dev
 ```
 
-打开 http://localhost:3000 ，点击「运行 Agent」即可看到默认演示（打开 `public/todo.html`，添加 3 条待办并断言）。
+打开 http://localhost:3000 ，点击「运行 Agent」即可看到默认演示（打开 todomvc.com 的 React 待办应用，添加 3 条待办并断言）。
 
 ### Docker 一键启动（免装 Node / Chromium）
 
@@ -75,36 +75,36 @@ docker compose up --build    # 构建镜像（含 Chromium）并启动 → http:
 
 ## 默认演示脚本
 
-- URL：`http://localhost:3000/todo.html`（`public/todo.html`，一个内置的极简待办页）
+- URL：`https://todomvc.com/examples/react/dist/`（TodoMVC 的 React 实现，公开的待办应用）
 - 任务：`打开这个待办事项页面，依次添加 3 条待办：买牛奶、写周报、预约体检。然后断言列表里恰好有 3 条待办。`
 
-预期流程：Agent 先 `getSnapshot` 拿到 `#todo-input`、`#add-btn`、`.todo-item` 等选择器 → 逐条 `type` + `click` 添加 → `assertCount(".todo-item", 3)` 校验 → 输出最终总结。
+预期流程：Agent 先 `getSnapshot` 拿到输入框等选择器 → 逐条 `type` + `press Enter` 添加 → `assertCount` 校验条数 → `assertText` 验证内容 → 输出最终总结。
 
 ## 可复现验证
 
 Agent 有随机性，「跑一次成功」说明不了问题。`npm run verify` 会自己起一个静态服务器提供
-`public/todo.html`（不需要先开着 `npm run dev`），跑固定用例，输出步数与 token 成本 ——
-它回答的是「改了 prompt 之后，到底是变好还是变差」。
+内置保险场景页（待办类用例跑在 todomvc.com 上，需外网；不需要先开着 `npm run dev`），
+跑固定用例，输出步数与 token 成本 —— 它回答的是「改了 prompt 之后，到底是变好还是变差」。
 
 ```bash
 npm run verify              # 跑全部用例
 npm run verify -- --only 2  # 只跑第 2 条
 ```
 
-当前八条用例的实测结果（`deepseek-chat`，`temperature: 0`，2026-10-23）：
+当前八条用例的实测结果（`deepseek-chat`，`temperature: 0`，2026-10-24）：
 
 | 用例 | 步数 | 耗时 | prompt | completion | 断言 | 结果 |
 | --- | --- | --- | --- | --- | --- | --- |
-| 添加 3 条待办 → 断言数量为 3 | 10 | 8.8s | 14127 | 450 | 2/2 | 通过 |
-| 添加 1 条指定内容 → 断言文本存在 | 6 | 5.6s | 7093 | 258 | 2/2 | 通过 |
-| 什么都不加 → 断言数量为 0 | 4 | 2.9s | 4093 | 175 | 2/2 | 通过 |
-| 记忆收益：同任务连跑两次，第二次命中经验 | 10 | 8.4s | 15360 | 455 | 2/2 | 通过 |
-| 保险场景：理赔报案提交 → 断言已受理 | 10 | 5.5s | 9183 | 492 | 2/2 | 通过 |
-| 保险场景：错误保单号被拦截 → 修正后重新提交 | 12 | 7.5s | 16269 | 665 | 2/2 | 通过 |
-| 失败反思：错误预期 → 反思后换策略断言成功 | 6 | 5.7s | 7767 | 414 | 2/3 | 通过 |
-| 门户场景：登录 → 查理赔进度 → 断言状态与金额 | 11 | 8.6s | 21099 | 562 | 3/3 | 通过 |
+| 添加 3 条待办 → 断言数量为 3 | 10 | 9.1s | 18580 | 479 | 2/2 | 通过 |
+| 添加 1 条指定内容 → 断言文本存在 | 5 | 5.3s | 8134 | 213 | 1/1 | 通过 |
+| 什么都不加 → 断言数量为 0 | 5 | 8.3s | 6323 | 237 | 3/3 | 通过 |
+| 记忆收益：同任务连跑两次，第二次命中经验（10→9 步） | 9 | 9.3s | 17581 | 407 | 1/1 | 通过 |
+| 保险场景：理赔报案提交 → 断言已受理 | 9 | 5.6s | 9198 | 430 | 1/1 | 通过 |
+| 保险场景：错误保单号被拦截 → 修正后重新提交 | 12 | 7.7s | 16550 | 631 | 2/2 | 通过 |
+| 失败反思：错误预期 → 反思后换策略断言成功 | 4 | 12.0s | 6523 | 242 | 1/2 | 通过 |
+| 门户场景：登录 → 查理赔进度 → 断言状态与金额 | 11 | 8.8s | 21398 | 528 | 3/3 | 通过 |
 
-通过率 **8/8**，全量 98440 token。
+通过率 **8/8**，全量 107454 token。
 
 ## 保险场景（差异化）
 
@@ -217,7 +217,6 @@ webpilot/
 │  ├─ guardrails.ts        # 域名白名单
 │  └─ memory.ts            # 任务记忆（RAG）：本地 embedding + 向量检索
 ├─ mcp/server.ts           # MCP Server：9 个工具的 stdio 协议层
-├─ public/todo.html        # 内置演示站点
 ├─ public/claim.html       # 模拟保险理赔报案页（数据纯虚构）
 ├─ public/portal.html      # 模拟保险门户：登录门 + 报案/进度查询 Tab 工作区
 ├─ python/agent_loop.py    # 同一 ReAct 循环的 Python 版（跨语言对照 + 自检）

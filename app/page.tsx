@@ -26,7 +26,7 @@ type ReportEvent = {
   assertionsFailed: number;
 };
 
-const DEFAULT_URL = "http://localhost:3000/todo.html";
+const DEFAULT_URL = "https://todomvc.com/examples/react/dist/";
 const DEFAULT_TASK =
   "打开这个待办事项页面，依次添加 3 条待办：买牛奶、写周报、预约体检。然后断言列表里恰好有 3 条待办。";
 
