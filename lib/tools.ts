@@ -100,7 +100,7 @@ export const toolSchemas: ToolSchema[] = [
     type: "function",
     function: {
       name: "assertText",
-      description: "断言匹配选择器的元素文本包含期望内容，返回通过/失败。用于验证结果。",
+      description: "断言匹配选择器的元素文本包含期望内容，返回通过/失败。最多等待 8 秒轮询，动态延迟出现的元素也能等到。用于验证结果。",
       parameters: {
         type: "object",
         properties: {
@@ -115,7 +115,7 @@ export const toolSchemas: ToolSchema[] = [
     type: "function",
     function: {
       name: "assertCount",
-      description: "断言匹配选择器的元素数量等于期望值，返回通过/失败。用于验证列表条数等。",
+      description: "断言匹配选择器的元素数量等于期望值，返回通过/失败。最多等待 8 秒轮询，动态延迟出现的元素也能等到。用于验证列表条数等。",
       parameters: {
         type: "object",
         properties: {
@@ -129,6 +129,35 @@ export const toolSchemas: ToolSchema[] = [
 ];
 
 /** 执行单个工具，返回结构化结果（喂回给 LLM） */
+
+// 断言轮询：动态页面的结果元素往往延迟数秒才出现（计时器/异步加载），
+// 即时检查会把「还没出现」误判成「没出现」。语义对齐 Playwright expect：
+// 在 ASSERT_WAIT_MS 预算内每 250ms 复查一次，期间任一次满足即通过。
+const ASSERT_WAIT_MS = Number(process.env.ASSERT_WAIT_MS ?? 8000);
+const POLL_INTERVAL_MS = 250;
+
+async function pollAssert<T>(
+  fn: () => Promise<{ pass: boolean; value: T }>,
+): Promise<{ pass: boolean; value: T; waitedMs: number }> {
+  const start = Date.now();
+  let last: { pass: boolean; value: T } | null = null;
+  for (;;) {
+    try {
+      last = await fn();
+      if (last.pass) break;
+    } catch {
+      // 轮询间隙元素被移除/页面跳转：当作本轮未通过，继续等
+    }
+    if (Date.now() - start >= ASSERT_WAIT_MS) break;
+    await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+  }
+  return {
+    pass: last?.pass ?? false,
+    value: (last?.value ?? (undefined as unknown)) as T,
+    waitedMs: Date.now() - start,
+  };
+}
+
 export async function executeTool(name: string, args: any, page: Page): Promise<any> {
   switch (name) {
     case "goto": {
@@ -213,26 +242,43 @@ export async function executeTool(name: string, args: any, page: Page): Promise<
     case "assertText": {
       const selector: string = String(args.selector ?? "");
       const expected: string = String(args.expected ?? "");
-      const loc = page.locator(selector);
-      const count = await loc.count();
-      if (count === 0) {
-        return { ok: false, pass: false, reason: `选择器 "${selector}" 没有匹配到元素` };
-      }
-      // 用 innerText 而不是 textContent：后者会把 <style>/<script> 的源码也算成
-      // 「元素文本」。实测在 <html> 上断言 addEventListener 会通过，而且会把
-      // 2KB 的 CSS/JS 源码原样回灌给模型 —— 既误判又白烧 token。
-      const raw = (await loc.first().innerText()).replace(/\s+/g, " ").trim();
+      const out = await pollAssert(async () => {
+        const loc = page.locator(selector);
+        if ((await loc.count()) === 0) {
+          return { pass: false, value: { missing: true, raw: "" } };
+        }
+        // 用 innerText 而不是 textContent：后者会把 <style>/<script> 的源码也算成
+        // 「元素文本」。实测在 <html> 上断言 addEventListener 会通过，而且会把
+        // 2KB 的 CSS/JS 源码原样回灌给模型 —— 既误判又白烧 token。
+        const raw = (await loc.first().innerText()).replace(/\s+/g, " ").trim();
+        return { pass: raw.includes(expected), value: { missing: false, raw } };
+      });
+      const raw = out.value.raw;
       const MAX = 300;
       const actual = raw.slice(0, MAX);
-      const pass = actual.includes(expected);
-      return { ok: true, pass, actual, expected, ...(raw.length > MAX ? { truncated: true } : {}) };
+      const result: any = {
+        ok: true,
+        pass: out.pass,
+        actual,
+        expected,
+        waited_ms: out.waitedMs,
+        ...(raw.length > MAX ? { truncated: true } : {}),
+      };
+      if (out.value.missing) {
+        result.reason = `选择器 "${selector}" 在 ${out.waitedMs}ms 内没有匹配到元素`;
+      }
+      return result;
     }
 
     case "assertCount": {
       const selector: string = String(args.selector ?? "");
       const expected: number = Number(args.expected);
-      const count = await page.locator(selector).count();
-      const result: any = { ok: true, pass: count === expected, actual: count, expected };
+      const out = await pollAssert(async () => {
+        const count = await page.locator(selector).count();
+        return { pass: count === expected, value: count };
+      });
+      const count = out.value;
+      const result: any = { ok: true, pass: out.pass, actual: count, expected, waited_ms: out.waitedMs };
       // 「0 个」有两层含义：列表真的是空的，或者选择器写错了。两者在结果上
       // 完全一样，所以 expected=0 的断言会假通过。把这个不确定性明确告诉模型，
       // 让它先核对选择器再下结论。
