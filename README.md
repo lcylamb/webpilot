@@ -272,3 +272,7 @@ LLM 额度。
 - 可观测：接 Langfuse 记录完整 trace。
 - 任务队列：Redis + BullMQ 支撑并发任务。
 - 存储升级：记忆量大后把 JSON 存储换成 sqlite-vec / Qdrant（检索管线不变）。
+
+## License
+
+MIT © 2026 lcylamb
