@@ -1,9 +1,12 @@
+import fs from "node:fs/promises";
+import path from "node:path";
 import type { Page } from "playwright";
 import type { ToolSchema } from "./llm";
 import { isAllowedUrl } from "./guardrails";
 
 /**
- * 8 个浏览器工具：导航 / 快照 / 可访问性树 / 点击 / 输入 / 按键 / 文本断言 / 数量断言。
+ * 11 个浏览器工具：导航 / 快照 / 可访问性树 / 点击 / 输入 / 按键 / 选择 / 文本断言 /
+ * 反向文本断言 / 数量断言 / 截图。
  * 每个工具对应一个 OpenAI function-calling 的 schema + 一个执行器。
  */
 
@@ -114,6 +117,23 @@ export const toolSchemas: ToolSchema[] = [
   {
     type: "function",
     function: {
+      name: "assertNotText",
+      description:
+        "断言匹配选择器的元素文本不包含期望内容；元素不存在也视为通过。" +
+        "用于验证某段内容已经消失。最多等待 8 秒轮询。",
+      parameters: {
+        type: "object",
+        properties: {
+          selector: { type: "string", description: "CSS 选择器" },
+          expected: { type: "string", description: "期望不存在的文本" },
+        },
+        required: ["selector", "expected"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "assertCount",
       description: "断言匹配选择器的元素数量等于期望值，返回通过/失败。最多等待 8 秒轮询，动态延迟出现的元素也能等到。用于验证列表条数等。",
       parameters: {
@@ -126,6 +146,15 @@ export const toolSchemas: ToolSchema[] = [
       },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "screenshot",
+      description:
+        "截取当前页面并保存为本地 JPEG，返回文件路径。用于留档、报告证据或任务要求截图时。",
+      parameters: { type: "object", properties: {} },
+    },
+  },
 ];
 
 /** 执行单个工具，返回结构化结果（喂回给 LLM） */
@@ -135,6 +164,11 @@ export const toolSchemas: ToolSchema[] = [
 // 在 ASSERT_WAIT_MS 预算内每 250ms 复查一次，期间任一次满足即通过。
 const ASSERT_WAIT_MS = Number(process.env.ASSERT_WAIT_MS ?? 8000);
 const POLL_INTERVAL_MS = 250;
+
+// 只读模式下拦截有副作用的按钮，避免 Agent 探索时误下单/误提交。
+const READONLY_MODE = process.env.READONLY_MODE === "1";
+const SIDE_EFFECT_RE =
+  /(加入购物车|立即购买|去结算|提交订单|确认支付|支付|删除|取消订单|\b(buy|checkout|purchase|pay|delete|submit)\b)/i;
 
 async function pollAssert<T>(
   fn: () => Promise<{ pass: boolean; value: T }>,
@@ -207,6 +241,21 @@ export async function executeTool(name: string, args: any, page: Page): Promise<
       const selector: string = String(args.selector ?? "");
       const loc = page.locator(selector).first();
       await loc.waitFor({ state: "visible", timeout: 8000 });
+      if (READONLY_MODE) {
+        const text = (
+          (await loc.innerText().catch(() => "")) ||
+          (await loc.getAttribute("aria-label")) ||
+          ""
+        )
+          .replace(/\s+/g, " ")
+          .trim();
+        if (SIDE_EFFECT_RE.test(text)) {
+          return {
+            ok: false,
+            error: `只读模式拦截：按钮「${text.slice(0, 30)}」属于有副作用的操作`,
+          };
+        }
+      }
       await loc.click();
       return { ok: true, clicked: selector };
     }
@@ -270,6 +319,34 @@ export async function executeTool(name: string, args: any, page: Page): Promise<
       return result;
     }
 
+    case "assertNotText": {
+      const selector: string = String(args.selector ?? "");
+      const expected: string = String(args.expected ?? "");
+      const out = await pollAssert(async () => {
+        const loc = page.locator(selector);
+        if ((await loc.count()) === 0) {
+          return { pass: true, value: { missing: true, raw: "" } };
+        }
+        const raw = (await loc.first().innerText()).replace(/\s+/g, " ").trim();
+        return { pass: !raw.includes(expected), value: { missing: false, raw } };
+      });
+      const raw = out.value.raw;
+      const MAX = 300;
+      const actual = raw.slice(0, MAX);
+      const result: any = {
+        ok: true,
+        pass: out.pass,
+        actual,
+        expected_absent: expected,
+        waited_ms: out.waitedMs,
+        ...(raw.length > MAX ? { truncated: true } : {}),
+      };
+      if (out.value.missing) {
+        result.note = `选择器 "${selector}" 未匹配到元素，按「内容不存在」判定通过`;
+      }
+      return result;
+    }
+
     case "assertCount": {
       const selector: string = String(args.selector ?? "");
       const expected: number = Number(args.expected);
@@ -288,6 +365,14 @@ export async function executeTool(name: string, args: any, page: Page): Promise<
           `也可能是「选择器本身写错了」——下结论前请用 getSnapshot 核对一次选择器。`;
       }
       return result;
+    }
+
+    case "screenshot": {
+      const dir = path.join(process.cwd(), "data", "screenshots");
+      await fs.mkdir(dir, { recursive: true });
+      const file = path.join(dir, `shot-${Date.now()}.jpg`);
+      await page.screenshot({ path: file, type: "jpeg", quality: 80 });
+      return { ok: true, path: file, url: page.url() };
     }
 
     default:

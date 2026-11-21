@@ -9,13 +9,13 @@
 ## 核心亮点
 
 - **手写 ReAct 执行循环**：决策 → 工具调用 → 观察 → 再决策，不依赖任何 Agent 框架。
-- **9 个浏览器工具**：`goto` / `getSnapshot` / `getAccessibilityTree` / `click` / `type` / `select` / `press` / `assertText` / `assertCount`，覆盖导航、观察、交互、断言。
+- **11 个浏览器工具**：`goto` / `getSnapshot` / `getAccessibilityTree` / `click` / `type` / `select` / `press` / `assertText` / `assertNotText` / `assertCount` / `screenshot`，覆盖导航、观察、交互、断言与截图留档。
 - **MCP 工具生态**：同一套工具以 MCP Server 形式对外提供（`npm run mcp`，stdio 传输），任何 MCP 客户端可复用；Agent 又可作为 MCP Host 连接外部 MCP server，外部工具以 `mcp__<server>__<tool>` 并入工具箱、与内置工具平权（见下方「MCP 工具生态」）。
 - **失败反思重试（Reflexion）**：断言未通过或工具报错时，注入反思消息要求模型先分析原因再换策略，禁止原样重试（上限 3 次）。
 - **可访问性树 + 精简元素快照**：用 `getSnapshot` 给模型提供「元素 → 建议 CSS 选择器」的映射，比塞整段 DOM 省 token、定位更稳。
 - **任务记忆（RAG）**：每次任务结束，把「成败 + 踩坑过程」确定性摘要成经验，用本地多语言 embedding 向量化入库；下次任务先按语义检索 top-k 历史经验注入 prompt。embedding 走本地 ONNX 模型，不走 API。
 - **实时过程可视化**：NDJSON 流式推送每一步的工具名、参数、结果与页面截图，记忆的召回/写入也在界面上可见，把黑盒推理变成可调试的产品界面。
-- **安全护栏**：最大步数、整体超时、域名白名单。
+- **安全护栏**：最大步数、整体超时、域名白名单；只读模式（`READONLY_MODE=1`）会拦截购买、提交、删除等有副作用的按钮。
 - **成本可观测**：报告页展示步数、耗时、prompt/completion token 数。
 
 ## 架构
