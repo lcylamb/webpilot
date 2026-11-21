@@ -14,12 +14,15 @@ const SYSTEM_PROMPT = `You are WebPilot, an agent that controls a headless brows
 Rules:
 - The page is ALREADY OPEN. Operate on it directly. Do NOT call goto again unless the task explicitly asks you to visit a different site — navigating to a domain outside the allow-list is rejected and wastes a step.
 - Work step by step. Before clicking or typing, inspect the page: call getSnapshot to discover elements and their suggested_selector values.
-- Use the suggested_selector values from getSnapshot when calling click / type / assertText / assertCount.
-- Verify your work: after making changes, use assertText or assertCount to confirm the expected state.
+- Use the suggested_selector values from getSnapshot when calling click / type / assertText / assertNotText / assertCount.
+- Verify your work: after making changes, use assertText or assertCount to confirm presence, and assertNotText to confirm something disappeared.
+- A task is only complete if every assertion you ran passed. If any assertion failed, the task is NOT complete — either fix it or declare STATUS: BLOCKED.
+- Use the screenshot tool when the task asks for visual evidence; it saves a local file and returns the path.
 - If a tool returns an error, read the message and adapt (for example, re-run getSnapshot to find the right selector). Do not repeat the exact same failing call more than twice.
 - When the task is complete and verified, reply with a short final summary and do NOT call any more tools.
 - The FIRST LINE of your final reply MUST be exactly "STATUS: DONE" if the task was completed and verified, or "STATUS: BLOCKED" if you could not complete it. Put the explanation on the lines after that.
-- Be concise. Prefer acting over long explanations.`;
+- Be concise. Prefer acting over long explanations.
+- Never click purchase, checkout, submit, delete, or other side-effecting buttons unless the task explicitly asks for that action. Prefer read-only verification.`;
 
 export type AgentEvent =
   | { type: "status"; message: string }
@@ -57,8 +60,9 @@ export async function runAgent(opts: {
   let promptTokens = 0;
   let completionTokens = 0;
   let stepNumber = 0;
-  let assertionsTotal = 0;
-  let assertionsFailed = 0;
+  // 同一条断言可能被反思重试多次，按 (工具+选择器+期望) 取最后一次结果，
+  // 避免「先失败后通过」被误判为失败，也避免重复计数。
+  const assertionResults = new Map<string, boolean>();
   // 记忆模块用：失败与成功交互全程收集，任务结束后摘要入库
   const failures: { tool: string; args: unknown; error?: string; pass?: boolean }[] = [];
   const actions: string[] = [];
@@ -161,11 +165,18 @@ export async function runAgent(opts: {
         // success 不能只看「模型不再调用工具了」—— 模型放弃任务时同样不再调用工具。
         // 优先信模型自己声明的 STATUS 行；它没写就退回「有没有失败的断言」。
         const status = finalText.match(/^\s*STATUS:\s*(DONE|BLOCKED)/i);
-        success = status ? status[1].toUpperCase() === "DONE" : assertionsFailed === 0;
+        const declaredDone = status ? status[1].toUpperCase() === "DONE" : true;
+        const failedCount = [...assertionResults.values()].filter((pass) => !pass).length;
+        // 模型说 DONE 不算数：只要有一条断言未通过，任务就按未完成处理。
+        success = declaredDone && failedCount === 0;
         // STATUS 行是给程序看的控制标记，展示给用户前去掉
         const displayText = finalText.replace(/^\s*STATUS:\s*(DONE|BLOCKED)\s*\n?/i, "").trim();
+        const note =
+          declaredDone && failedCount > 0
+            ? `\n\n注意：有 ${failedCount} 条断言未通过，任务按未完成处理。`
+            : "";
 
-        onEvent({ type: "final", text: displayText || finalText, success });
+        onEvent({ type: "final", text: (displayText || finalText) + note, success });
         break;
       }
 
@@ -207,9 +218,13 @@ export async function runAgent(opts: {
 
         // 断言工具的 pass 是「任务是否真的完成」最硬的依据 ——
         // 模型自己的措辞可能含糊，断言结果不会。
-        if (name === "assertText" || name === "assertCount") {
-          assertionsTotal += 1;
-          if (!result?.pass) assertionsFailed += 1;
+        if (
+          name === "assertText" ||
+          name === "assertNotText" ||
+          name === "assertCount"
+        ) {
+          const key = `${name}:${String(args?.selector ?? "")}:${String(args?.expected ?? "")}`;
+          assertionResults.set(key, Boolean(result?.pass));
         }
 
         // 记忆素材：失败和被验证有效的交互都要记
@@ -256,6 +271,11 @@ export async function runAgent(opts: {
       finalText = `达到最大步数（${maxSteps}），任务未完成。`;
       onEvent({ type: "final", text: finalText, success: false });
     }
+
+    const assertionsTotal = assertionResults.size;
+    const assertionsFailed = [...assertionResults.values()].filter(
+      (pass) => !pass,
+    ).length;
 
     onEvent({
       type: "report",

@@ -1,6 +1,6 @@
 # 真实站点测试用例（自己跑）
 
-在 WebPilot 工作台（http://127.0.0.1:3000）里，把「目标 URL」和「任务」原样复制进去，点「运行 Agent」即可。
+在 WebPilot 工作台（<http://127.0.0.1:3000）里，把「目标> URL」和「任务」原样复制进去，点「运行 Agent」即可。  
 白名单需含 `todomvc.com,saucedemo.com,the-internet.herokuapp.com,parabank.parasoft.com`（`.env.local` 已配好）。
 
 以下是 2026-10-24 实测过的全部用例，含实测成绩，可复跑对照。
